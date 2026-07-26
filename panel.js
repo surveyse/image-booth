@@ -7,6 +7,7 @@
 
   const grid = document.getElementById('recordsGrid');
   const emptyState = document.getElementById('emptyState');
+  const listHead = document.getElementById('listHead');
   const loginSection = document.getElementById('loginSection');
   const panelSection = document.getElementById('panelSection');
   const loginForm = document.getElementById('loginForm');
@@ -244,8 +245,29 @@
     }
   }
 
+
+  function renderRows(records) {
+    return records
+      .map(
+        (record, index) => `
+          <a class="row-link" href="response-detail.html?id=${encodeURIComponent(record.id)}">
+            <img class="row-thumb" src="${escapeHtml(record.photoUrl)}" alt="Photo ${index + 1}" loading="lazy">
+            <div>
+              <div class="row-title">#${index + 1}</div>
+              <div class="row-sub">${escapeHtml(formatDate(record.uploadedAt))}</div>
+            </div>
+            <div class="row-meta gps">${escapeHtml(formatLocation(record))}</div>
+            <div class="row-meta device">${escapeHtml(inferDevice(record.userAgent))}</div>
+            <div class="row-chevron" aria-hidden="true">›</div>
+          </a>
+        `
+      )
+      .join('');
+  }
+
   async function render() {
     emptyState.hidden = true;
+    if (listHead) listHead.hidden = true;
     grid.innerHTML = '<p class="empty">Loading photos from Cloudinary...</p>';
 
     const localRecords = readLocalRecords();
@@ -262,53 +284,18 @@
     }
 
     emptyState.hidden = true;
-    if (error) {
-      grid.innerHTML =
-        `<p class="empty" style="margin-bottom:16px">${escapeHtml(error)}</p>` +
-        records
-          .map(
-            (record, index) => `
-          <a class="card" href="response-detail.html?id=${encodeURIComponent(record.id)}">
-            <div class="thumb-wrap">
-              <img class="thumb" src="${escapeHtml(record.photoUrl)}" alt="Photo ${index + 1}" loading="lazy">
-            </div>
-            <div class="content">
-              <h2 class="title">#${index + 1}</h2>
-              <span class="meta">${escapeHtml(formatDate(record.uploadedAt))}</span>
-              <span class="meta">GPS: ${escapeHtml(formatLocation(record))}</span>
-              <span class="meta">${escapeHtml(inferDevice(record.userAgent))}</span>
-            </div>
-          </a>
-        `
-          )
-          .join('');
-      return;
-    }
+    if (listHead) listHead.hidden = false;
 
-    // Also keep cloud records in localStorage so detail page works
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records.slice(0, 200)));
     } catch {
       /* ignore */
     }
 
-    grid.innerHTML = records
-      .map(
-        (record, index) => `
-          <a class="card" href="response-detail.html?id=${encodeURIComponent(record.id)}">
-            <div class="thumb-wrap">
-              <img class="thumb" src="${escapeHtml(record.photoUrl)}" alt="Photo ${index + 1}" loading="lazy">
-            </div>
-            <div class="content">
-              <h2 class="title">#${index + 1}</h2>
-              <span class="meta">${escapeHtml(formatDate(record.uploadedAt))}</span>
-              <span class="meta">GPS: ${escapeHtml(formatLocation(record))}</span>
-              <span class="meta">${escapeHtml(inferDevice(record.userAgent))}</span>
-            </div>
-          </a>
-        `
-      )
-      .join('');
+    const warning = error
+      ? `<p class="empty" style="margin-bottom:12px">${escapeHtml(error)}</p>`
+      : '';
+    grid.innerHTML = warning + renderRows(records);
   }
 
   if (!isAuthConfigured()) {
