@@ -14,16 +14,6 @@
 
   const authCfg = window.IMAGE_PANEL_AUTH || {};
 
-  function readRecords() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const records = raw ? JSON.parse(raw) : [];
-      return Array.isArray(records) ? records : [];
-    } catch {
-      return [];
-    }
-  }
-
   function escapeHtml(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -57,6 +47,96 @@
     if (/Macintosh|Mac OS X/i.test(ua)) return 'Mac';
     if (/Linux/i.test(ua)) return 'Linux';
     return 'Unknown';
+  }
+
+  function readLocalRecords() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const records = raw ? JSON.parse(raw) : [];
+      return Array.isArray(records) ? records : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function cloudinaryListUrl() {
+    const cloud = authCfg.cloudName;
+    const tag = authCfg.listTag || 'web-capture';
+    if (!cloud) return null;
+    return `https://res.cloudinary.com/${encodeURIComponent(cloud)}/image/list/${encodeURIComponent(tag)}.json`;
+  }
+
+  function mapCloudinaryResource(resource) {
+    const publicId = resource.public_id || '';
+    const version = resource.version || '';
+    const format = resource.format || 'jpg';
+    const cloud = authCfg.cloudName;
+    const photoUrl =
+      resource.secure_url ||
+      resource.url ||
+      `https://res.cloudinary.com/${cloud}/image/upload/v${version}/${publicId}.${format}`;
+
+    const ctx = resource.context?.custom || resource.context || {};
+    const ua = ctx.user_agent ? decodeURIComponent(String(ctx.user_agent)) : '';
+
+    return {
+      id: resource.asset_id || publicId,
+      photoUrl,
+      publicId,
+      uploadedAt: resource.created_at || new Date().toISOString(),
+      userAgent: ua,
+      latitude: ctx.latitude != null ? Number(ctx.latitude) : null,
+      longitude: ctx.longitude != null ? Number(ctx.longitude) : null,
+      source: 'cloudinary'
+    };
+  }
+
+  async function fetchCloudinaryRecords() {
+    const url = cloudinaryListUrl();
+    if (!url) return { records: [], error: null };
+
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) {
+        return {
+          records: [],
+          error:
+            res.status === 401 || res.status === 403 || res.status === 404
+              ? 'Cloudinary resource list is disabled. In Cloudinary: Settings → Security → Restricted image types → uncheck Resource list.'
+              : `Cloudinary list failed (${res.status})`
+        };
+      }
+      const data = await res.json();
+      const resources = Array.isArray(data.resources) ? data.resources : [];
+      const records = resources
+        .map(mapCloudinaryResource)
+        .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+      return { records, error: null };
+    } catch {
+      return { records: [], error: 'Could not reach Cloudinary list API.' };
+    }
+  }
+
+  function mergeRecords(cloudRecords, localRecords) {
+    const byId = new Map();
+    cloudRecords.forEach((r) => byId.set(String(r.id), r));
+    localRecords.forEach((r) => {
+      const key = String(r.id || r.publicId || r.photoUrl);
+      const existing = byId.get(key);
+      if (!existing) {
+        byId.set(key, { ...r, source: 'local' });
+        return;
+      }
+      byId.set(key, {
+        ...existing,
+        userAgent: existing.userAgent || r.userAgent || '',
+        latitude: existing.latitude ?? r.latitude ?? null,
+        longitude: existing.longitude ?? r.longitude ?? null
+      });
+    });
+    return Array.from(byId.values()).sort(
+      (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
+    );
   }
 
   function isLocalAuth() {
@@ -164,15 +244,54 @@
     }
   }
 
-  function render() {
-    const records = readRecords();
+  async function render() {
+    emptyState.hidden = true;
+    grid.innerHTML = '<p class="empty">Loading photos from Cloudinary...</p>';
+
+    const localRecords = readLocalRecords();
+    const { records: cloudRecords, error } = await fetchCloudinaryRecords();
+    const records = mergeRecords(cloudRecords, localRecords);
+
     if (!records.length) {
-      emptyState.hidden = false;
       grid.innerHTML = '';
+      emptyState.hidden = false;
+      emptyState.textContent = error
+        ? error
+        : 'No photos yet. Capture from the home page, then refresh this panel.';
       return;
     }
 
     emptyState.hidden = true;
+    if (error) {
+      grid.innerHTML =
+        `<p class="empty" style="margin-bottom:16px">${escapeHtml(error)}</p>` +
+        records
+          .map(
+            (record, index) => `
+          <a class="card" href="response-detail.html?id=${encodeURIComponent(record.id)}">
+            <div class="thumb-wrap">
+              <img class="thumb" src="${escapeHtml(record.photoUrl)}" alt="Photo ${index + 1}" loading="lazy">
+            </div>
+            <div class="content">
+              <h2 class="title">#${index + 1}</h2>
+              <span class="meta">${escapeHtml(formatDate(record.uploadedAt))}</span>
+              <span class="meta">GPS: ${escapeHtml(formatLocation(record))}</span>
+              <span class="meta">${escapeHtml(inferDevice(record.userAgent))}</span>
+            </div>
+          </a>
+        `
+          )
+          .join('');
+      return;
+    }
+
+    // Also keep cloud records in localStorage so detail page works
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(records.slice(0, 200)));
+    } catch {
+      /* ignore */
+    }
+
     grid.innerHTML = records
       .map(
         (record, index) => `
