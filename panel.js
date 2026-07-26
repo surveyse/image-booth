@@ -2,6 +2,7 @@
 
 (function () {
   const STORAGE_KEY = 'image-upload-records';
+  const DELETED_KEY = 'image-deleted-ids';
   const AUTH_TOKEN_KEY = 'image_panel_auth_token';
   const AUTH_EXPIRES_KEY = 'image_panel_auth_expires_at';
 
@@ -48,6 +49,60 @@
     if (/Macintosh|Mac OS X/i.test(ua)) return 'Mac';
     if (/Linux/i.test(ua)) return 'Linux';
     return 'Unknown';
+  }
+
+
+  function readDeletedIds() {
+    try {
+      const raw = localStorage.getItem(DELETED_KEY);
+      const ids = raw ? JSON.parse(raw) : [];
+      return Array.isArray(ids) ? ids.map(String) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveDeletedIds(ids) {
+    try {
+      localStorage.setItem(DELETED_KEY, JSON.stringify(ids.slice(0, 500)));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function markDeleted(record) {
+    const ids = readDeletedIds();
+    const keys = [record.id, record.publicId, record.photoUrl].filter(Boolean).map(String);
+    keys.forEach((k) => {
+      if (!ids.includes(k)) ids.push(k);
+    });
+    saveDeletedIds(ids);
+
+    const records = readLocalRecords().filter((r) => {
+      const rk = [r.id, r.publicId, r.photoUrl].filter(Boolean).map(String);
+      return !rk.some((x) => keys.includes(x));
+    });
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function isDeletedRecord(record) {
+    const deleted = new Set(readDeletedIds());
+    return [record.id, record.publicId, record.photoUrl]
+      .filter(Boolean)
+      .map(String)
+      .some((k) => deleted.has(k));
+  }
+
+  async function deleteFromCloudinary(record) {
+    if (!record.deleteToken || !authCfg.cloudName) return false;
+    const url = `https://api.cloudinary.com/v1_1/${authCfg.cloudName}/delete_by_token`;
+    const body = new URLSearchParams({ token: record.deleteToken });
+    const res = await fetch(url, { method: 'POST', body });
+    return res.ok;
   }
 
   function readLocalRecords() {
@@ -119,25 +174,42 @@
   }
 
   function mergeRecords(cloudRecords, localRecords) {
-    const byId = new Map();
-    cloudRecords.forEach((r) => byId.set(String(r.id), r));
-    localRecords.forEach((r) => {
-      const key = String(r.id || r.publicId || r.photoUrl);
-      const existing = byId.get(key);
-      if (!existing) {
-        byId.set(key, { ...r, source: 'local' });
-        return;
+    const byKey = new Map();
+
+    function keysFor(r) {
+      return [r.publicId, r.id, r.photoUrl].filter(Boolean).map(String);
+    }
+
+    function put(r) {
+      const keys = keysFor(r);
+      let existing = null;
+      for (const k of keys) {
+        if (byKey.has(k)) {
+          existing = byKey.get(k);
+          break;
+        }
       }
-      byId.set(key, {
-        ...existing,
-        userAgent: existing.userAgent || r.userAgent || '',
-        latitude: existing.latitude ?? r.latitude ?? null,
-        longitude: existing.longitude ?? r.longitude ?? null
-      });
-    });
-    return Array.from(byId.values()).sort(
-      (a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt)
-    );
+      const merged = existing
+        ? {
+            ...existing,
+            ...r,
+            userAgent: r.userAgent || existing.userAgent || '',
+            latitude: r.latitude ?? existing.latitude ?? null,
+            longitude: r.longitude ?? existing.longitude ?? null,
+            deleteToken: r.deleteToken || existing.deleteToken || null,
+            publicId: r.publicId || existing.publicId || ''
+          }
+        : r;
+      keysFor(merged).forEach((k) => byKey.set(k, merged));
+    }
+
+    cloudRecords.forEach(put);
+    localRecords.forEach((r) => put({ ...r, source: r.source || 'local' }));
+
+    const unique = Array.from(new Set(byKey.values()));
+    return unique
+      .filter((r) => !isDeletedRecord(r))
+      .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
   }
 
   function isLocalAuth() {
@@ -250,7 +322,7 @@
     return records
       .map(
         (record, index) => `
-          <a class="row-link" href="response-detail.html?id=${encodeURIComponent(record.id)}">
+          <a class="row-link" href="response-detail.html?id=${encodeURIComponent(record.id)}" data-id="${escapeHtml(String(record.id))}">
             <img class="row-thumb" src="${escapeHtml(record.photoUrl)}" alt="Photo ${index + 1}" loading="lazy">
             <div>
               <div class="row-title">#${index + 1}</div>
@@ -258,6 +330,7 @@
             </div>
             <div class="row-meta gps">${escapeHtml(formatLocation(record))}</div>
             <div class="row-meta device">${escapeHtml(inferDevice(record.userAgent))}</div>
+            <button type="button" class="row-delete" data-delete-id="${escapeHtml(String(record.id))}" title="Delete" aria-label="Delete">✕</button>
             <div class="row-chevron" aria-hidden="true">›</div>
           </a>
         `
@@ -298,6 +371,43 @@
     grid.innerHTML = warning + renderRows(records);
   }
 
+
+  if (grid && !grid.dataset.deleteBound) {
+    grid.dataset.deleteBound = '1';
+    grid.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.row-delete');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const id = btn.getAttribute('data-delete-id');
+      if (!id) return;
+      if (!window.confirm('Delete this capture from the panel?')) return;
+
+      const records = readLocalRecords();
+      const fromLocal = records.find((r) => String(r.id) === String(id));
+      // Also search current DOM-backed cache via merged storage
+      let record = fromLocal;
+      if (!record) {
+        try {
+          const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+          record = all.find((r) => String(r.id) === String(id)) || { id: id };
+        } catch {
+          record = { id: id };
+        }
+      }
+
+      btn.disabled = true;
+      try {
+        await deleteFromCloudinary(record);
+      } catch {
+        /* ignore cloud errors; still hide locally */
+      }
+      markDeleted(record);
+      await render();
+    });
+  }
+
   if (!isAuthConfigured()) {
     showPanel();
   } else if (isLoggedIn()) {
@@ -316,7 +426,9 @@
       authError.hidden = true;
       authError.textContent = '';
 
-      if (!isAuthConfigured()) {
+    
+
+  if (!isAuthConfigured()) {
         authError.hidden = false;
         authError.textContent = 'Auth is not configured in panel-config.js';
         return;

@@ -214,7 +214,8 @@
       uploadedAt: new Date().toISOString(),
       userAgent: getUserAgent(),
       latitude: location?.latitude ?? null,
-      longitude: location?.longitude ?? null
+      longitude: location?.longitude ?? null,
+      deleteToken: uploadResult.delete_token || null
     });
     saveStoredRecords(records.slice(0, 200));
   }
