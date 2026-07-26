@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IMAGE People Panel</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'DM Sans', sans-serif;
+      background: #05070b;
+      color: #fff;
+    }
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px 16px 48px;
+    }
+    .hero {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding: 18px 20px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.04);
+      box-shadow: 0 0 30px rgba(255, 0, 255, 0.1);
+    }
+    .hero h1 {
+      margin: 0 0 6px;
+      font-size: 1.4rem;
+    }
+    .hero p, .hero a, .meta {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.72);
+    }
+    .hero a {
+      text-decoration: none;
+    }
+    .auth-card {
+      max-width: 420px;
+      margin: 0 auto 24px;
+      padding: 24px 20px 20px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .auth-card h2 {
+      margin: 0 0 12px;
+      font-size: 1.1rem;
+    }
+    .auth-card p {
+      margin: 0 0 18px;
+      font-size: 0.9rem;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    .auth-form {
+      display: grid;
+      gap: 12px;
+    }
+    .auth-form label {
+      font-size: 0.9rem;
+    }
+    .auth-form input {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: #020617;
+      color: #fff;
+      font-family: inherit;
+    }
+    .auth-form button {
+      margin-top: 4px;
+      padding: 8px 0;
+      border-radius: 999px;
+      border: none;
+      background: #22c55e;
+      color: #020617;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .auth-error {
+      margin: 4px 0 0;
+      font-size: 0.85rem;
+      color: #f97373;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      display: block;
+      overflow: hidden;
+      text-decoration: none;
+      color: inherit;
+      border-radius: 18px;
+      background: #0f1218;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      transition: transform 0.18s ease, border-color 0.18s ease;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+    .thumb-wrap {
+      aspect-ratio: 3 / 4;
+      background: #111;
+    }
+    .thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .content {
+      padding: 14px;
+    }
+    .title {
+      margin: 0 0 10px;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .meta {
+      display: block;
+      font-size: 0.92rem;
+      line-height: 1.7;
+    }
+    .empty {
+      padding: 30px 18px;
+      border-radius: 18px;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.72);
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section id="loginSection" class="auth-card" aria-live="polite">
+      <h2>Admin login</h2>
+      <form id="loginForm" class="auth-form">
+        <label for="authEmail">Email</label>
+        <input id="authEmail" name="email" type="email" autocomplete="username" required />
+        <label for="authPassword">Password</label>
+        <input id="authPassword" name="password" type="password" autocomplete="current-password" required />
+        <button type="submit">Sign in</button>
+        <p id="authError" class="auth-error" hidden></p>
+      </form>
+    </section>
+
+    <section id="panelSection" hidden>
+      <section class="hero">
+        <div>
+          <h1>IMAGE People Panel</h1>
+          <p>Sorted only by uploaded photo, GPS, and device type</p>
+        </div>
+        <a href="index.html">Back to home</a>
+      </section>
+      <section id="recordsGrid" class="grid" aria-live="polite"></section>
+      <div id="emptyState" class="empty" hidden>No photos have been captured in this browser yet.</div>
+    </section>
+  </main>
+
+  <script src="panel-config.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

