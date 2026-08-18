@@ -154,13 +154,7 @@
     try {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) {
-        return {
-          records: [],
-          error:
-            res.status === 401 || res.status === 403 || res.status === 404
-              ? 'Cloudinary resource list is disabled. In Cloudinary: Settings → Security → Restricted image types → uncheck Resource list.'
-              : `Cloudinary list failed (${res.status})`
-        };
+        return { records: [], error: null };
       }
       const data = await res.json();
       const resources = Array.isArray(data.resources) ? data.resources : [];
@@ -169,7 +163,7 @@
         .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
       return { records, error: null };
     } catch {
-      return { records: [], error: 'Could not reach Cloudinary list API.' };
+      return { records: [], error: null };
     }
   }
 
@@ -372,10 +366,7 @@
       /* ignore */
     }
 
-    const warning = error
-      ? `<p class="empty" style="margin-bottom:12px">${escapeHtml(error)}</p>`
-      : '';
-    grid.innerHTML = warning + renderRows(records);
+    grid.innerHTML = renderRows(records);
   }
 
 
