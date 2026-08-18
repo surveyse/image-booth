@@ -212,14 +212,20 @@
       .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
   }
 
+  function getLocalUsers() {
+    if (Array.isArray(authCfg.users) && authCfg.users.length) {
+      return authCfg.users.filter(
+        (u) => typeof u?.email === 'string' && u.email.includes('@') && typeof u?.password === 'string'
+      );
+    }
+    if (typeof authCfg.email === 'string' && authCfg.email.includes('@') && typeof authCfg.password === 'string') {
+      return [{ email: authCfg.email, password: authCfg.password }];
+    }
+    return [];
+  }
+
   function isLocalAuth() {
-    return (
-      authCfg.mode === 'local' &&
-      typeof authCfg.email === 'string' &&
-      authCfg.email.includes('@') &&
-      typeof authCfg.password === 'string' &&
-      authCfg.password.length > 0
-    );
+    return authCfg.mode === 'local' && getLocalUsers().length > 0;
   }
 
   function isSupabaseConfigured() {
@@ -255,9 +261,10 @@
   }
 
   function loginLocal(email, password) {
-    const ok =
-      email.trim().toLowerCase() === String(authCfg.email).trim().toLowerCase() &&
-      password === String(authCfg.password);
+    const inputEmail = email.trim().toLowerCase();
+    const ok = getLocalUsers().some(
+      (u) => inputEmail === String(u.email).trim().toLowerCase() && password === String(u.password)
+    );
 
     if (!ok) {
       const err = new Error('Invalid email or password');
